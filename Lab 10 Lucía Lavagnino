@@ -1,0 +1,85 @@
+#include <Arduino.h>
+#include "stm32f4xx.h"
+#include "stm32f4xx_hal.h"
+#include "fatfs.h"  // Biblioteca para manejo de archivos en SD
+
+// ESP32 Configuración
+#define ADC_PIN 34  // Pin ADC en ESP32
+#define UART_TX_PIN 17
+#define UART_RX_PIN 16
+
+// STM32 Configuración
+UART_HandleTypeDef huart3;
+GPIO_InitTypeDef GPIO_InitStruct;
+volatile uint8_t uartDataReceived = 0;
+uint8_t adcValueStr[10];
+
+// Funciones ESP32
+void ESP32_Setup() {
+    // Inicialización UART para ESP32
+    Serial2.begin(115200, SERIAL_8N1, UART_RX_PIN, UART_TX_PIN);
+    // Inicialización del ADC
+    pinMode(ADC_PIN, INPUT);
+}
+
+void ESP32_Loop() {
+    // Leer el valor analógico del ESP32
+    int adcValue = analogRead(ADC_PIN);
+    // Enviar el valor leído por UART al STM32
+    Serial2.println(adcValue);
+    delay(1000);  // Enviar cada segundo
+}
+
+// Función de callback para interrupción del botón (STM32)
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
+    if (GPIO_Pin == GPIO_PIN_13) {  // Botón conectado al pin 13
+        HAL_UART_Receive(&huart3, adcValueStr, sizeof(adcValueStr), HAL_MAX_DELAY);
+        uartDataReceived = 1;
+    }
+}
+
+// Función para guardar el valor en la SD usando SPI (STM32)
+void SaveValueToSD(int adcValue) {
+    char buffer[50];
+    sprintf(buffer, "ADC Value: %d\n", adcValue);
+
+    FIL fil;
+    FRESULT fres = f_open(&fil, "data.txt", FA_OPEN_APPEND | FA_WRITE);
+    if (fres == FR_OK) {
+        f_write(&fil, buffer, strlen(buffer), NULL);
+        f_close(&fil);
+    }
+}
+
+// Configuración de la STM32
+void STM32_Setup() {
+    HAL_Init();
+    SystemClock_Config();  // Configuración del reloj
+    MX_GPIO_Init();  // Inicialización de GPIO para botón y otros periféricos
+    MX_USART3_UART_Init();  // Inicialización de UART para STM32
+    // Configuración adicional si es necesario
+}
+
+void STM32_Loop() {
+    if (uartDataReceived) {
+        uartDataReceived = 0;
+        // Convertir el valor recibido de UART a entero
+        int adcValue = atoi((char*)adcValueStr);
+        // Guardar el valor en la SD
+        SaveValueToSD(adcValue);
+    }
+}
+
+int main(void) {
+    // Configuración inicial
+    STM32_Setup();  // Configuración para la STM32
+    ESP32_Setup();  // Configuración para el ESP32 (lectura ADC y UART)
+
+    // Bucle principal
+    while (1) {
+        ESP32_Loop();  // Lectura y envío de datos por UART (ESP32)
+        STM32_Loop();  // Recepción por UART y almacenamiento en SD (STM32)
+    }
+}
+
+// Configuraciones de reloj, GPIO, UART, SPI y FATFS para STM32 omitidas por brevedad
